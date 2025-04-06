@@ -1,0 +1,1 @@
+{"root":["../src/configt.ts","../src/index.ts","../src/prisma/seed.ts","../src/routes/order.ts","../src/routes/socket.ts","../src/routes/user.ts","../src/routes/db/db.ts","../src/routes/kafka/consumer.ts","../src/routes/kafka/producer.ts","../src/types/index.ts"],"version":"5.8.3"}

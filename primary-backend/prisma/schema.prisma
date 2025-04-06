@@ -1,0 +1,77 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id String @id @default(uuid())
+  name String 
+  username String @unique
+  phoneNo String @unique
+  address String?
+  userRole UserRole @default(CUSTOMER)
+  orders Order[]
+}
+
+model Restaurent {
+  id String @id @default(uuid())
+  resName String?
+  resRating Float @default(0.0)
+  isOpen Boolean @default(true)
+  orders Order[]
+}
+
+model DeliveryAgent{
+  id String @id @default(uuid())
+  name String
+  phoneNo String
+  isOnline Boolean @default(false)
+  orders Order[]
+}
+
+model Order{
+  id String @id @default(uuid())
+  restaurentId String
+  userId String
+  deliveryId String
+  status OrderStatus
+  totalPrice Int
+  res Restaurent @relation(fields: [restaurentId],references: [id])
+  user User @relation(fields: [userId],references: [id])
+  deliveryAgent DeliveryAgent @relation(fields: [deliveryId],references: [id])
+  placed_at DateTime @default(now())
+  updateAt DateTime @updatedAt
+  items OrderItems[]
+}
+
+model OrderItems{
+  id String @id @default(uuid())
+  orderId String
+  name String
+  quantity Int
+  price Int
+  order Order @relation(fields: [orderId],references: [id])
+}
+
+enum OrderStatus {
+  PLACED
+  ACCEPTED
+  PICKED
+  DELIVERED
+}
+
+enum UserRole {
+  CUSTOMER
+  DELIVERY
+  ADMIN
+}
