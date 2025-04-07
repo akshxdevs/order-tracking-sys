@@ -15,7 +15,7 @@ datasource db {
 
 model User {
   id String @id @default(uuid())
-  name String 
+  name String? 
   username String @unique
   phoneNo String @unique
   address String?
@@ -26,6 +26,7 @@ model User {
 model Restaurent {
   id String @id @default(uuid())
   resName String?
+  resPhoneNo String?
   resRating Float @default(0.0)
   isOpen Boolean @default(true)
   orders Order[]

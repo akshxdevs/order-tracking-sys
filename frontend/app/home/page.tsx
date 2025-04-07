@@ -15,7 +15,12 @@ export default function(){
     const [showCartModel, setShowCartModel] = useState(false);
     const [showLoginModel, setShowLoginModel] = useState(false);
     const [loginRole,setLoginRole] = useState<string>();
+    const [showVerifyOtpModel,setShowVerifyOtpModel] = useState(false);
+    const [phoneNo,setPhoneNo] = useState();
+    const [otp,setOtp] = useState();
     const [showOtpModel, setShowOtpModel] = useState(false);
+    const [showDeliveryModel,setShowDeliveryModel] = useState(false);
+    const [showRestaurentModel,setShowRestaurentModel] = useState(false);
     const router = useRouter();
     const totalPrice = products.reduce((cur,product)=>cur + product.price,0);
     console.log(totalPrice);
@@ -260,7 +265,7 @@ export default function(){
                         <div>
                             <button className="shadow-xl p-3 w-full mt-8 bg-[#00000098] text-center hover:bg-gray-700 rounded-lg" onClick={async()=>{
                                     try {
-                                        const res = await axios.post(`${BACKEND_URL}`,{
+                                        const res = await axios.post(`${BACKEND_URL}/orders`,{
                                             restaurentId:"992398fa-1c43-4110-8d9b-40dfa897495e",
                                             userId:"aa530365-a565-4680-89aa-07edefe7a88f",
                                             deliveryId:"ce3d8a74-5af3-4be5-a86f-529b3090fd9c",
@@ -310,13 +315,87 @@ export default function(){
             <div className="fixed inset-0 bottom-0 top-0 bg-slate-600 backdrop-blur-sm bg-opacity-10 flex flex-col justify-center items-center">
                 <div className="bg-black p-10">
                     <div className="w-full border border-gray-700 rounded-lg">
-                        <input className="p-2 bg-black rounded-lg" type="text" placeholder="Enter your mobile Number.."/>
+                        <input className="p-2 bg-black rounded-lg" type="text" value={phoneNo} onChange={(e:any)=>setPhoneNo(e.target.value)} placeholder="Enter your mobile Number.."/>
                     </div>
                     <div className="py-2 text-center border border-gray-600 rounded-lg hover:bg-gray-600 my-2">
-                        <button>
+                        <button onClick={async()=>{
+                            try {
+                                const res = await axios.post(`${BACKEND_URL}/user/login`,{
+                                    phoneNo,
+                                });
+                                if (res.data) {
+                                    toast.success("Otp Generated Successfully!");
+                                    setShowOtpModel(false);
+                                    setShowVerifyOtpModel(true);
+                                }
+                            } catch (error) {
+                                
+                            }
+                        }}>
                             Generate OTP
                         </button>
                     </div>
+                </div>
+            </div>
+        )}
+        {showVerifyOtpModel && (
+            <div className="fixed inset-0 bottom-0 top-0 bg-slate-600 backdrop-blur-sm bg-opacity-10 flex flex-col justify-center items-center">
+                <div className="bg-black p-10">
+                    <div className="w-full border border-gray-700 rounded-lg">
+                        <input className="p-2 bg-black rounded-lg" type="text" value={otp} onChange={(e:any)=>setOtp(e.target.value)} placeholder="Enter your otp number.."/>
+                    </div>
+                    <div className="py-2 text-center border border-gray-600 rounded-lg hover:bg-gray-600 my-2">
+                        <button onClick={async()=>{
+                            try {
+                                const res = await axios.post(`${BACKEND_URL}/user/login/verify-otp`,{
+                                    phoneNo,
+                                    userRole:loginRole,
+                                    otp,
+                                });
+                                if (res.data) {
+                                    toast.success("Otp Generated Successfully!");
+                                    if (loginRole === "") {
+
+                                    }
+                                    switch (loginRole) {
+                                        case "CUSTOMER":
+                                            setShowVerifyOtpModel(false);
+                                            setShowProducts(true);
+                                            break;
+                                        case "ADMIN":
+                                            setShowVerifyOtpModel(false);
+                                            setShowRestaurentModel(true);
+                                            break;
+                                        case "DELIVERY":
+                                            setShowVerifyOtpModel(false);
+                                            setShowDeliveryModel(true);
+                                            break;
+                                        default:
+                                            toast.error("Invalid Role!")
+                                            break;
+                                    }
+                                }
+                            } catch (error) {
+                                
+                            }
+                        }}>
+                            Login
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+        {showRestaurentModel && (
+            <div className="fixed inset-0 bottom-0 top-0 bg-slate-600 backdrop-blur-sm bg-opacity-10 flex flex-col justify-center items-center">
+                <div className="bg-black p-10">
+
+                </div>
+            </div>
+        )}
+        {showDeliveryModel && (
+            <div className="fixed inset-0 bottom-0 top-0 bg-slate-600 backdrop-blur-sm bg-opacity-10 flex flex-col justify-center items-center">
+                <div className="bg-black p-10">
+
                 </div>
             </div>
         )}

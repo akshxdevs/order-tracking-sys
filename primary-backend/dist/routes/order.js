@@ -16,7 +16,7 @@ const producer_1 = require("./kafka/producer");
 const client_1 = require("@prisma/client");
 const types_1 = require("../types");
 const router = (0, express_1.Router)();
-router.post("/orders", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+router.post("/place-order", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { restaurentId, userId, deliveryId, totalPrice, items } = req.body;
         const [restaurent, user, delivery] = yield Promise.all([

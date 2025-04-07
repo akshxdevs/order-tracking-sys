@@ -6,7 +6,7 @@ import { statusSchema } from "../types";
 
 const router = Router();
 
-router.post("/orders",async(req,res)=>{
+router.post("/place-order",async(req,res)=>{
     try {
         const { restaurentId, userId, deliveryId, totalPrice, items } = req.body;
         const  [restaurent,user,delivery] = await Promise.all([
