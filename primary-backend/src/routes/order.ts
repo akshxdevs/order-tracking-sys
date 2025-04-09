@@ -111,4 +111,96 @@ router.patch('/orders/:id/status', async (req, res) => {
         res.status(411).json({message:"Something Went Wrong!"});
     }
   });
+  router.get("/delivery-available",async(req,res)=>{
+    try {
+        const deliveryAvailable = await prismaClient.deliveryAgent.findMany({
+            where:{
+                isOnline:true
+            }
+        })
+        if (deliveryAvailable) {
+            res.json({
+                message:"Delivery Agent Ids fetched!!",
+                details:deliveryAvailable
+            })
+        }
+    } catch (err) {
+        console.error(err);
+        res.status(411).json({message:"Something Went Wrong!"});
+    }
+  });
+  router.get("/restaurent-available",async(req,res)=>{
+    try {
+        const restaurentAvailable = await prismaClient.restaurent.findMany({
+            where:{
+                isOpen:true
+            }
+        })
+        if (restaurentAvailable) {
+            res.json({
+                message:"Delivery Agent Ids fetched!!",
+                details:restaurentAvailable
+            })
+        }
+    } catch (err) {
+        console.error(err);
+        res.status(411).json({message:"Something Went Wrong!"});
+    }
+  });
+  router.get("/orders/restaurent/:id/status",async(req,res)=>{
+    try {
+        const { id } = req.params
+        const getOrders = await prismaClient.order.findMany({
+            where:{
+                restaurentId:id
+            }
+        })
+        if (getOrders) {
+            res.json({
+                message:"Order Details fetched!!",
+                orderDetails:getOrders
+            })
+        }
+    } catch (err) {
+        console.error(err);
+        res.status(411).json({message:"Something Went Wrong!"});
+    }
+  });
+  router.get("/orders/delivery/:id/status",async(req,res)=>{
+    try {
+        const { id } = req.params
+        const getOrders = await prismaClient.order.findMany({
+            where:{
+                deliveryId:id
+            }
+        })
+        if (getOrders) {
+            res.json({
+                message:"Order Details fetched!!",
+                orderDetails:getOrders
+            })
+        }
+    } catch (err) {
+        console.error(err);
+        res.status(411).json({message:"Something Went Wrong!"});
+    }
+  });
+  router.get("/placed-orders",async(req,res)=>{
+    try {
+        const getOrders = await prismaClient.order.findMany({
+            where:{
+                status:"PLACED"
+            }
+        })
+        if (getOrders) {
+            res.json({
+                message:"Orders fetched!!",
+                orders:getOrders
+            })
+        }
+    } catch (err) {
+        console.error(err);
+        res.status(411).json({message:"Something Went Wrong!"});
+    }
+  });
 export const orderRouter = router;

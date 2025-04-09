@@ -1,13 +1,9 @@
-"use client";
 import { BACKEND_URL } from "@/config";
 import axios from "axios";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react"
-import { toast, ToastContainer } from "react-toastify";
+import { useState } from "react";
+import { toast } from "react-toastify";
 import 'react-toastify/dist/ReactToastify.css';
-import { io, Socket } from "socket.io-client";
-
-export default function(){
+const ProductsComponent = () => {
     const [showPorducts,setShowProducts] = useState(false);
     const [burgerCount,setBurgerCount] = useState(1);
     const [cokeCount,setCokeCount] = useState(1);
@@ -32,86 +28,8 @@ export default function(){
     const [connected, setConnected] = useState<boolean>(false);
     const [orders,setOrders] = useState<any[]>([]);
     const [delivery,setDelivery] = useState<any[]>([]);
-    const [placedOrders,setPlacedOrders] = useState<any[]>([]);
-    const [showNotification,setShowNotification] = useState(false);
-    const router = useRouter();
-    let socket: Socket;
     const totalPrice = products.reduce((cur,product)=>cur + product.price,0);
-    function truncateUUID(uuid: string, visibleChars: number = 12): string {
-        if (uuid.length <= visibleChars) return uuid;
-        return `${uuid.slice(0, visibleChars)}...`;
-      }
-    useEffect(()=>{
-        const storedUserId = localStorage.getItem("userId");
-        const storedRestaurentId = localStorage.getItem("restaurentId");
-        const storedDeliveryId = localStorage.getItem("deliveryId");
-        if (storedUserId || storedRestaurentId || storedDeliveryId){
-            setUserId(storedUserId);
-            setRestaurentId(storedRestaurentId);
-            setDeliveryId(storedDeliveryId);
-        }
-    },[loginRole])
-
-    useEffect(() => {
-        socket = io("http://localhost:3000");
-
-        socket.on("connect", () => {
-        console.log("Connected:", socket.id);
-        setConnected(true);
-        setStatus("Live status Active");
-
-        socket.emit("join-order", orderId);
-        });
-
-        socket.on("order-status-update", (data) => {
-        console.log("Order Status Update:", data);
-        setStatus(data.status);
-        });
-
-        socket.on("disconnect", () => {
-        console.log("Disconnected");
-        setConnected(false);
-        setStatus("Disconnected from socket.");
-        });
-
-        return () => {
-        socket.disconnect();
-        };
-    }, [orderId]);
-
-
-    const getDeliveryOrders = async()=>{
-        const res = await axios.get(`${BACKEND_URL}/order/orders/delivery/${deliveryId}/status`) 
-        if (res.data) {
-            console.log(res.data);
-            console.log(deliveryId);
-            
-            setOrders(res.data.details);
-        }
-    } 
-    const getRestaurentOrders = async()=>{
-        const res = await axios.get(`${BACKEND_URL}/order/orders/restaurent/${restaurentId}/status`) 
-        if (res.data) {
-            console.log(res.data);
-            console.log(restaurentId);
-            setOrders(res.data.orderDetails);
-        }
-    } 
-    const getPlacedOrders = async()=>{
-        const res = await axios.get(`${BACKEND_URL}/order/placed-orders`) 
-        if (res.data) {
-            setPlacedOrders(res.data.orders);
-        }
-    } 
-
     return <div>
-        <div className="flex flex-col justify-center items-center h-screen">    
-            <div className="p-10 border text-center border-gray-700 rounded-lg">
-                <h1 className="text-2xl font-semibold">To See All The Products Click Below!!</h1>
-                <button className="p-3 border mt-2 font-normal border-gray-700 rounded-lg hover:bg-gray-800 bg-gray-900" onClick={()=>{
-                    setShowLoginModel(true)}}>Take Me In</button>
-            </div>
-        </div>
         {showPorducts && (
             <div className="fixed inset-0 bottom-0 top-0 bg-slate-600 backdrop-blur-sm bg-opacity-10 flex flex-col justify-center items-center">
                 <div className="bg-gray-900 p-10">
@@ -171,6 +89,7 @@ export default function(){
                                             );
 
                                                 if (existingIndex !== -1) {
+                                                    console.log(existingIndex);
                                                     updatedProducts = [...products];
                                                     updatedProducts[existingIndex].quantity += newProduct.quantity;
                                                     updatedProducts[existingIndex].price += newProduct.price;
@@ -183,7 +102,7 @@ export default function(){
                                                 ];
                                             }
                                             setProducts(updatedProducts);
-                                            // console.log("🛒 Updated Cart:", updatedProducts);
+                                            console.log("🛒 Updated Cart:", updatedProducts);
                                         }}
                                         >
                                         Add to cart
@@ -248,7 +167,7 @@ export default function(){
                                     }
 
                                     setProducts(updatedProducts);
-                                    // console.log("🛒 Cart Updated:", updatedProducts);
+                                    console.log("🛒 Cart Updated:", updatedProducts);
                                     }}
                                 >
                                     Add to Cart
@@ -305,7 +224,7 @@ export default function(){
                                             }]
                                         }
                                         setProducts(updatedProducts);
-                                        // console.log(updatedProducts);
+                                        console.log(updatedProducts);
                                     }}>Add to cart</button>
                                 </div>
                             </div>
@@ -383,254 +302,5 @@ export default function(){
                 </div>
             </div>
         )}
-        {showLoginModel && (
-            <div className="fixed inset-0 bottom-0 top-0 bg-slate-600 backdrop-blur-sm bg-opacity-10 flex flex-col justify-center items-center">
-                <div className="bg-black p-10">
-                    <h1 className="text-2xl font-semibold text-center py-2">Who are you?? 🤔</h1>
-                    <div className="flex flex-row">
-                        <div className="border rounded-lg p-2 mx-2"><button onClick={()=>{
-                            setLoginRole("CUSTOMER");
-                            setShowLoginModel(false);
-                            setShowOtpModel(true);
-                            }}>Customer</button></div>
-                        <div className="border rounded-lg p-2 mx-2" onClick={()=>{
-                            setLoginRole("ADMIN");
-                            setShowLoginModel(false);
-                            setShowOtpModel(true);
-                            }}><button>Restaurent</button></div>
-                        <div className="border rounded-lg p-2 mx-2" onClick={()=>{
-                            setLoginRole("DELIVERY");
-                            setShowLoginModel(false);
-                            setShowOtpModel(true);
-                            }}><button>Delivery Agent</button></div>
-                    </div>
-                </div>
-            </div>
-        )};
-        {showOtpModel && (
-            <div className="fixed inset-0 bottom-0 top-0 bg-slate-600 backdrop-blur-sm bg-opacity-10 flex flex-col justify-center items-center">
-                <div className="bg-black p-10">
-                    <div className="w-full border border-gray-700 rounded-lg">
-                        <input className="p-2 bg-black rounded-lg" type="text" value={phoneNo} onChange={(e:any)=>setPhoneNo(e.target.value)} placeholder="Enter your mobile Number.."/>
-                    </div>
-                    <div className="py-2 text-center border border-gray-600 rounded-lg hover:bg-gray-600 my-2">
-                        <button onClick={async()=>{
-                            try {
-                                const res = await axios.post(`${BACKEND_URL}/user/login`,{
-                                    phoneNo,
-                                });
-                                if (res.data) {
-                                    toast.success("Otp Generated Successfully!");
-                                    setShowOtpModel(false);
-                                    setShowVerifyOtpModel(true);
-                                }
-                            } catch (error) {
-                                
-                            }
-                        }}>
-                            Generate OTP
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )}
-        {showVerifyOtpModel && (
-            <div className="fixed inset-0 bottom-0 top-0 bg-slate-600 backdrop-blur-sm bg-opacity-10 flex flex-col justify-center items-center">
-                <div className="bg-black p-10">
-                    <div className="w-full border border-gray-700 rounded-lg">
-                        <input className="p-2 bg-black rounded-lg" type="text" value={otp} onChange={(e:any)=>setOtp(e.target.value)} placeholder="Enter your otp number.."/>
-                    </div>
-                    <div className="py-2 text-center border border-gray-600 rounded-lg hover:bg-gray-600 my-2">
-                        <button onClick={async()=>{
-                            try {
-                                if (loginRole === "CUSTOMER") {
-                                    const res = await axios.post(`${BACKEND_URL}/user/login/customer/verify-otp`,{
-                                        phoneNo:phoneNo,
-                                        userRole:String(loginRole),
-                                        otp:otp,
-                                    });
-                                    if (res.data) {
-                                        // console.log(res.data);
-                                        localStorage.setItem(`${loginRole}`,res.data.token);
-                                        localStorage.setItem(`userId`,res.data.user.id);
-                                        toast.success("Customer Login Successfully!");
-                                        setShowVerifyOtpModel(false);
-                                        setShowProducts(true);
-                                    }
-                                }else if (loginRole === "ADMIN") {
-                                    const res = await axios.post(`${BACKEND_URL}/user/login/admin/verify-otp`,{
-                                        phoneNo:phoneNo,
-                                        userRole:String(loginRole),
-                                        otp:otp,
-                                    });
-                                    if (res.data) {
-                                        setShowVerifyOtpModel(false);
-                                        setShowRestaurentModel(true);                                        
-                                        toast.success("Restaurent Login Successfully!");
-                                        localStorage.setItem(`${loginRole}`,res.data.token);
-                                        localStorage.setItem("restaurentId",res.data.restaurent.id);
-                                        getRestaurentOrders();
-                                        getPlacedOrders();
-                                        }
-                                }else if (loginRole === "DELIVERY") {
-                                    const res = await axios.post(`${BACKEND_URL}/user/login/delivery/verify-otp`,{
-                                        phoneNo:phoneNo,
-                                        otp:otp,
-                                        userRole:String(loginRole),
-                                    });
-                                    if (res.data) {
-                                        setShowVerifyOtpModel(false);
-                                        setShowDeliveryModel(true);
-                                        toast.success("Delivery Login Successfully!");
-                                        localStorage.setItem(`${loginRole}`,res.data.token);
-                                        setStatusMessage(res?.data?.delivery?.orders?.[0]?.status);
-                                        setOrderId(res?.data?.delivery?.orders?.[0]?.id);
-                                        localStorage.setItem("deliveryId",res.data.delivery.id);
-                                        getDeliveryOrders();
-                                        }
-                                }
-                            } catch (error) {
-                                console.error(error);
-                                toast.error("Something Went Wrong!");
-                            }
-                        }}>
-                            Login
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )}
-        {showRestaurentModel && (
-            <div className="fixed inset-0 bottom-0 top-0 bg-slate-600 backdrop-blur-sm bg-opacity-10 flex flex-col justify-center items-center">
-                    <div>
-                        <div className="flex justify-between">
-                            <div>
-                                <h1 className="text-2xl font-bold ">Restaurent details</h1>
-                                <div className="flex mb-4 mt-2 gap-2">
-                                    <h2 className="text-xs font-semibold text-gray-400">Order Live Status</h2>
-                                    <img width="15" height="15" src="https://img.icons8.com/ios-glyphs/30/40C057/full-stop.png" alt="full-stop"/>
-                                </div>
-                            </div>
-                            <div className="">
-                                <button onClick={()=>setShowNotification(true)} className="mx-3">
-                                    <img width="25" height="25" src="https://img.icons8.com/color/48/appointment-reminders.png" alt="appointment-reminders"/>
-                                </button>
-                                <button>
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" className="size-6">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-                        <table className="w-full border-collapse bg-white text-left text-sm text-gray-500">
-                            <thead className="bg-gray-50">
-                                <tr>
-                                <th scope="col" className="px-6 py-4 font-medium text-gray-900">Order Id</th>
-                                <th scope="col" className="px-6 py-4 font-medium text-gray-900">Order Price</th>
-                                <th scope="col" className="px-6 py-4 font-medium text-gray-900">Order Status</th>
-                                <th scope="col" className="px-6 py-4 font-medium text-gray-900">Payment Method</th>
-                                <th scope="col" className="px-6 py-4 font-medium text-gray-900 text-right">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100 border-t border-gray-100">
-                                {orders.map((order, index) => (
-                                <tr key={index}>
-                                    <th className="px-6 py-4 font-medium text-gray-900">{order.id}</th>
-                                    <td className="px-6 py-4">{order.totalPrice} $</td>
-                                    <td className="px-6 py-4">
-                                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold 
-                                        ${order.status === "DELIVERED" ? "bg-green-50 text-green-600" : "bg-yellow-50 text-yellow-600"}`}>
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20" className="h-3 w-3">
-                                        <path
-                                            fillRule="evenodd"
-                                            d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
-                                            clipRule="evenodd"
-                                        />
-                                        </svg>
-                                        {order.status}
-                                    </span>
-                                    </td>
-                                    <td className="px-6 py-4">{order.paymentMethod || "UPI"}</td>
-                                    <td className="flex justify-end gap-4 px-6 py-4 text-sm text-right">
-                                    <button className="text-red-500 hover:underline">Delete</button>
-                                    <button className="text-blue-600 hover:underline">Edit</button>
-                                    </td>
-                                </tr>
-                                ))}
-                        </tbody>
-                    </table>
-                </div>
-                {showNotification &&(
-                    <div className="fixed inset-0 bottom-0 top-0 left-[600px] flex flex-col justify-center items-center">
-                        <div className="bg-slate-100 text-black">
-                            <div className="flex justify-between gap-3 px-5 pt-3">
-                                <div>
-                                    <h1>Notifications</h1>
-                                </div>
-                                <div>
-                                    <button onClick={()=>setShowNotification(false)}>
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" className="size-6">
-                                            <path stroke-linecap="round" stroke-linejoin="round" d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-                                        </svg>
-                                </button>
-                                </div>
-                            </div>
-                            <div className="flex flex-row justify-center items-center px-5 pt-2 pb-5 ">                                   
-                                <div className="flex gap-3 border border-gray-500 p-3 rounded-lg">
-                                    {placedOrders.map((order,index)=>(
-                                        <div key={index} className="flex flex-row">
-                                            <div className="flex-col">
-                                                <h1 className="text-sm font-semibold mt-3">{truncateUUID(order.id, 12)}</h1>
-                                                <p className="text-xs font-light">{order.totalPrice} $</p>
-                                            </div>
-                                            <button className="text-sm border-2 border-green-700 rounded-lg p-2" onClick={async()=>{
-                                                setUpdateStatus("Accepted");
-                                                console.log(updateStatus);
-                                                const res = await axios.patch(`${BACKEND_URL}/order/orders/${order.id}/status`,{
-                                                status:updateStatus.toLocaleUpperCase(),
-                                                });
-                                                if (res.data) {
-                                                }
-                                            }}>Accept</button>
-                                            <button className="text-sm border-2 border-red-700 rounded-lg p-2">Reject</button>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </div>
-        )}
-        {showDeliveryModel && (
-            <div className="fixed inset-0 bottom-0 top-0 bg-slate-600 backdrop-blur-sm bg-opacity-10 flex flex-col justify-center items-center">
-                <div className="bg-black p-10">
-                    <div>
-                        <h1>Delivery details</h1>
-                        <p>Status: <span>{statusMessage}</span></p>
-                        <div>
-                            <p>Update Status:{updateStatus}</p>
-                            <button className="font-normal border border-gray-600 p-2 hover:bg-gray-500 rounded-lg" onClick={()=>{
-                                setUpdateStatus("Picked")
-                            }}>Picked</button>
-                            <button className="font-normal border border-gray-600 p-2 hover:bg-gray-500 rounded-lg" onClick={()=>{
-                                setUpdateStatus("Delivered")
-                            }}>Delivered</button>
-
-                        </div>                            
-                        <button className="text-center font-normal border border-gray-600 p-2 hover:bg-gray-500 rounded-lg" onClick={async()=>{
-                                const res = await axios.patch(`${BACKEND_URL}/order/orders/${orderId}/status`,{
-                                    status:updateStatus.toLocaleUpperCase(),
-                                });
-                                if (res.data) {
-                                    console.log(res.data);
-                                }
-                            }}>Update 🚀
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )}
-        <ToastContainer/>
     </div>
 }

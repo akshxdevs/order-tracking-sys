@@ -112,11 +112,108 @@ router.get("/delivery/status/:id", (req, res) => __awaiter(void 0, void 0, void 
 }));
 router.get("/all-orders/status", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const getOrderStatus = yield db_1.prismaClient.order.findMany({});
-        if (getOrderStatus) {
+        const getAllOrders = yield db_1.prismaClient.order.findMany({});
+        if (getAllOrders) {
             res.json({
                 message: "Order Status Details fetched!!",
-                details: getOrderStatus
+                details: getAllOrders
+            });
+        }
+    }
+    catch (err) {
+        console.error(err);
+        res.status(411).json({ message: "Something Went Wrong!" });
+    }
+}));
+router.get("/delivery-available", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const deliveryAvailable = yield db_1.prismaClient.deliveryAgent.findMany({
+            where: {
+                isOnline: true
+            }
+        });
+        if (deliveryAvailable) {
+            res.json({
+                message: "Delivery Agent Ids fetched!!",
+                details: deliveryAvailable
+            });
+        }
+    }
+    catch (err) {
+        console.error(err);
+        res.status(411).json({ message: "Something Went Wrong!" });
+    }
+}));
+router.get("/restaurent-available", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const restaurentAvailable = yield db_1.prismaClient.restaurent.findMany({
+            where: {
+                isOpen: true
+            }
+        });
+        if (restaurentAvailable) {
+            res.json({
+                message: "Delivery Agent Ids fetched!!",
+                details: restaurentAvailable
+            });
+        }
+    }
+    catch (err) {
+        console.error(err);
+        res.status(411).json({ message: "Something Went Wrong!" });
+    }
+}));
+router.get("/orders/restaurent/:id/status", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const getOrders = yield db_1.prismaClient.order.findMany({
+            where: {
+                restaurentId: id
+            }
+        });
+        if (getOrders) {
+            res.json({
+                message: "Order Details fetched!!",
+                orderDetails: getOrders
+            });
+        }
+    }
+    catch (err) {
+        console.error(err);
+        res.status(411).json({ message: "Something Went Wrong!" });
+    }
+}));
+router.get("/orders/delivery/:id/status", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const getOrders = yield db_1.prismaClient.order.findMany({
+            where: {
+                deliveryId: id
+            }
+        });
+        if (getOrders) {
+            res.json({
+                message: "Order Details fetched!!",
+                orderDetails: getOrders
+            });
+        }
+    }
+    catch (err) {
+        console.error(err);
+        res.status(411).json({ message: "Something Went Wrong!" });
+    }
+}));
+router.get("/placed-orders", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const getOrders = yield db_1.prismaClient.order.findMany({
+            where: {
+                status: "PLACED"
+            }
+        });
+        if (getOrders) {
+            res.json({
+                message: "Orders fetched!!",
+                orders: getOrders
             });
         }
     }
