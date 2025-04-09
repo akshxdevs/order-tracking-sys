@@ -2,9 +2,10 @@
 import { BACKEND_URL } from "@/config";
 import axios from "axios";
 import { useRouter } from "next/navigation";
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { toast, ToastContainer } from "react-toastify";
 import 'react-toastify/dist/ReactToastify.css';
+import { io, Socket } from "socket.io-client";
 
 export default function(){
     const [showPorducts,setShowProducts] = useState(false);
@@ -14,17 +15,76 @@ export default function(){
     const [products,setProducts] = useState<any[]>([]);
     const [showCartModel, setShowCartModel] = useState(false);
     const [showLoginModel, setShowLoginModel] = useState(false);
-    const [loginRole,setLoginRole] = useState<string>();
+    const [loginRole,setLoginRole] = useState("");
     const [showVerifyOtpModel,setShowVerifyOtpModel] = useState(false);
     const [phoneNo,setPhoneNo] = useState();
     const [otp,setOtp] = useState();
     const [showOtpModel, setShowOtpModel] = useState(false);
     const [showDeliveryModel,setShowDeliveryModel] = useState(false);
     const [showRestaurentModel,setShowRestaurentModel] = useState(false);
+    const [userId,setUserId] = useState<string | null>(null);
+    const [restaurentId,setRestaurentId] = useState<string | null>(null);
+    const [deliveryId,setDeliveryId] = useState<string | null>(null);
+    const [statusMessage,setStatusMessage] = useState<string>("");
+    const [updateStatus,setUpdateStatus] = useState("");
+    const [orderId,setOrderId] = useState("d7e98d72-a217-4f9f-b759-aa1f62b98d1d");
+    const [status, setStatus] = useState<string>("Connecting...");
+    const [connected, setConnected] = useState<boolean>(false);
+    const [orders,setOrders] = useState<any[]>([]);
     const router = useRouter();
+    let socket: Socket;
     const totalPrice = products.reduce((cur,product)=>cur + product.price,0);
-    console.log(totalPrice);
-    
+
+    useEffect(()=>{
+        console.log(loginRole);
+        const storedUserId = localStorage.getItem("userId");
+        const storedRestaurentId = localStorage.getItem("restaurentId");
+        const storedDeliveryId = localStorage.getItem("deiveryId");
+        if (storedDeliveryId || storedUserId || storedRestaurentId){
+            setUserId(storedUserId);
+            setRestaurentId(storedRestaurentId);
+            setDeliveryId(storedDeliveryId);
+        }
+    },[loginRole])
+
+    useEffect(() => {
+        socket = io("http://localhost:3000");
+
+        socket.on("connect", () => {
+        console.log("Connected:", socket.id);
+        setConnected(true);
+        setStatus("Live status Active");
+
+        socket.emit("join-order", orderId);
+        });
+
+        socket.on("order-status-update", (data) => {
+        console.log("Order Status Update:", data);
+        setStatus(data.status);
+        });
+
+        socket.on("disconnect", () => {
+        console.log("Disconnected");
+        setConnected(false);
+        setStatus("Disconnected from socket.");
+        });
+
+        return () => {
+        socket.disconnect();
+        };
+    }, [orderId]);
+
+    useEffect(()=>{
+        getAllOrders();
+    },[]);
+    const getAllOrders = async()=>{
+        const res = await axios.get(`${BACKEND_URL}/order/all-orders/status`) 
+        if (res.data) {
+            console.log(res.data);
+            setOrders(res.data.details);
+        }
+    } 
+
     return <div>
         <div className="flex flex-col justify-center items-center h-screen">    
             <div className="p-10 border text-center border-gray-700 rounded-lg">
@@ -209,7 +269,7 @@ export default function(){
                                             name:"Pizza",
                                             price:30,
                                             unitPrice:30,
-                                            quantity:pizzaCount
+                                            quantity:pizzaCount 
                                         });
                                         let updatedProducts;
                                         const existingIndex = products.findIndex(
@@ -265,17 +325,17 @@ export default function(){
                         <div>
                             <button className="shadow-xl p-3 w-full mt-8 bg-[#00000098] text-center hover:bg-gray-700 rounded-lg" onClick={async()=>{
                                     try {
-                                        const res = await axios.post(`${BACKEND_URL}/orders`,{
-                                            restaurentId:"992398fa-1c43-4110-8d9b-40dfa897495e",
-                                            userId:"aa530365-a565-4680-89aa-07edefe7a88f",
-                                            deliveryId:"ce3d8a74-5af3-4be5-a86f-529b3090fd9c",
+                                        const res = await axios.post(`${BACKEND_URL}/order/place-order`,{
+                                            restaurentId:"e411838c-aeb5-4aaf-b62e-2e991e8cde2a",
+                                            userId:"c4fd2049-d8a5-43ba-8f7a-d7f7b68d5b05",
+                                            deliveryId:"a9287145-5aba-40f5-b768-3ec420824ce7",
                                             totalPrice:totalPrice, 
                                             items:products 
                                         })
                                         if (res.data) {
                                             toast.success("Order Placed Successfully");
                                             setShowCartModel(false);
-                                            router.push("/order-confirmed")
+                                            // router.push("/order-confirmed");
                                         }   
                                     } catch (error) {
                                         console.error(error);
@@ -347,36 +407,56 @@ export default function(){
                     <div className="py-2 text-center border border-gray-600 rounded-lg hover:bg-gray-600 my-2">
                         <button onClick={async()=>{
                             try {
-                                const res = await axios.post(`${BACKEND_URL}/user/login/verify-otp`,{
-                                    phoneNo,
-                                    userRole:loginRole,
-                                    otp,
-                                });
-                                if (res.data) {
-                                    toast.success("Otp Generated Successfully!");
-                                    if (loginRole === "") {
+                                if (loginRole === "CUSTOMER") {
+                                    const res = await axios.post(`${BACKEND_URL}/user/login/customer/verify-otp`,{
+                                        phoneNo:phoneNo,
+                                        userRole:String(loginRole),
+                                        otp:otp,
+                                    });
+                                    if (res.data) {
+                                        console.log(res.data);
+                                        localStorage.setItem(`${loginRole}`,res.data.token);
+                                        localStorage.setItem(`userId`,res.data.user.id);
+                                        toast.success("Customer Login Successfully!");
+                                        setShowVerifyOtpModel(false);
+                                        setShowProducts(true);
+                                    }
+                                }else if (loginRole === "ADMIN") {
+                                    const res = await axios.post(`${BACKEND_URL}/user/login/admin/verify-otp`,{
+                                        phoneNo:phoneNo,
+                                        userRole:String(loginRole),
+                                        otp:otp,
+                                    });
+                                    if (res.data) {
 
-                                    }
-                                    switch (loginRole) {
-                                        case "CUSTOMER":
-                                            setShowVerifyOtpModel(false);
-                                            setShowProducts(true);
-                                            break;
-                                        case "ADMIN":
-                                            setShowVerifyOtpModel(false);
-                                            setShowRestaurentModel(true);
-                                            break;
-                                        case "DELIVERY":
-                                            setShowVerifyOtpModel(false);
-                                            setShowDeliveryModel(true);
-                                            break;
-                                        default:
-                                            toast.error("Invalid Role!")
-                                            break;
-                                    }
+                                        console.log(res.data);
+                                        setShowVerifyOtpModel(false);
+                                        setShowRestaurentModel(true);                                        
+                                        toast.success("Restaurent Login Successfully!");
+                                        localStorage.setItem(`${loginRole}`,res.data.token);
+                                        localStorage.setItem(`restaurentId`,res.data.restaurent.id);
+                                        }
+                                }else if (loginRole === "DELIVERY") {
+                                    const res = await axios.post(`${BACKEND_URL}/user/login/delivery/verify-otp`,{
+                                        phoneNo:phoneNo,
+                                        otp:otp,
+                                        userRole:String(loginRole),
+                                    });
+                                    if (res.data) {
+                                        console.log(res.data);
+                                        setShowVerifyOtpModel(false);
+                                        setShowDeliveryModel(true);
+                                        toast.success("Delivery Login Successfully!");
+                                        localStorage.setItem(`${loginRole}`,res.data.token);
+                                        setStatusMessage(res?.data?.delivery?.orders?.[0]?.status);
+                                        setOrderId(res?.data?.delivery?.orders?.[0]?.id);
+                                        console.log(statusMessage);
+                                        localStorage.setItem(`deliveryId`,res.data.delivery.id);
+                                        }
                                 }
                             } catch (error) {
-                                
+                                console.error(error);
+                                toast.error("Something Went Wrong!");
                             }
                         }}>
                             Login
@@ -387,15 +467,90 @@ export default function(){
         )}
         {showRestaurentModel && (
             <div className="fixed inset-0 bottom-0 top-0 bg-slate-600 backdrop-blur-sm bg-opacity-10 flex flex-col justify-center items-center">
-                <div className="bg-black p-10">
+                    <div>
+                        <h1>Restaurent details</h1>
+                        <h2 className="text-xl font-semibold mb-4 text-gray-700">Order Live Status</h2>
+                        {orders.map((order,index)=>(
+                            <div key={index}>
+                                <table className="w-full border-collapse bg-white text-left text-sm text-gray-500">
+                                <thead className="bg-gray-50">
+                                        <tr>
+                                            <th scope="col" className="px-6 py-4 font-medium text-gray-900">Order Id</th>
+                                            <th scope="col" className="px-6 py-4 font-medium text-gray-900">Order Price</th>
+                                            <th scope="col" className="px-6 py-4 font-medium text-gray-900">Order Status</th>
+                                            <th scope="col" className="px-6 py-4 font-medium text-gray-900">Payment Methord</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100 border-t border-gray-100">
+                                        <tr>
+                                            <th className="px-6 py-4 font-medium text-gray-900">{order.id}</th>
+                                            <td className="px-6 py-4">{order.totalPrice} $</td>
+                                            <td className="px-6 py-4">
+                                                <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-1 text-xs font-semibold text-green-600">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3">
+                                                    <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clip-rule="evenodd" />
+                                                    </svg>
+                                                    <p className={`text-lg ${connected ? "text-green-600" : "text-red-500"}`}>
+                                                        {status}
+                                                    </p>
+                                                </span>
+                                                </td>
+                                            <td className="px-6 py-4">UPI</td>
+                                            <td className="flex justify-end gap-4 px-6 py-4 font-medium">
+                                            <a href="">Delete</a>
+                                            <a href="" className="text-primary-700">Edit</a></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        ))}
+                        <div>
+                            <p>Update Status:{updateStatus}</p>
+                            <button className="font-normal border border-gray-600 p-2 hover:bg-gray-500 rounded-lg" onClick={()=>{
+                                setUpdateStatus("Accepted")
+                            }}>Accepted
+                            </button>                        
+                            <button className="text-center font-normal border border-gray-600 p-2 hover:bg-gray-500 rounded-lg" onClick={async()=>{
+                                    const res = await axios.patch(`${BACKEND_URL}/order/orders/${orderId}/status`,{
+                                        status:updateStatus.toLocaleUpperCase(),
+                                    });
+                                    if (res.data) {
+                                        console.log(res.data);
+                                    }
+                                }}>Update 🚀
+                            </button>
+                        </div>                            
 
-                </div>
+                    </div>
+
             </div>
         )}
         {showDeliveryModel && (
             <div className="fixed inset-0 bottom-0 top-0 bg-slate-600 backdrop-blur-sm bg-opacity-10 flex flex-col justify-center items-center">
                 <div className="bg-black p-10">
+                    <div>
+                        <h1>Delivery details</h1>
+                        <p>Status: <span>{statusMessage}</span></p>
+                        <div>
+                            <p>Update Status:{updateStatus}</p>
+                            <button className="font-normal border border-gray-600 p-2 hover:bg-gray-500 rounded-lg" onClick={()=>{
+                                setUpdateStatus("Picked")
+                            }}>Picked</button>
+                            <button className="font-normal border border-gray-600 p-2 hover:bg-gray-500 rounded-lg" onClick={()=>{
+                                setUpdateStatus("Delivered")
+                            }}>Delivered</button>
 
+                        </div>                            
+                        <button className="text-center font-normal border border-gray-600 p-2 hover:bg-gray-500 rounded-lg" onClick={async()=>{
+                                const res = await axios.patch(`${BACKEND_URL}/order/orders/${orderId}/status`,{
+                                    status:updateStatus.toLocaleUpperCase(),
+                                });
+                                if (res.data) {
+                                    console.log(res.data);
+                                }
+                            }}>Update 🚀
+                        </button>
+                    </div>
                 </div>
             </div>
         )}

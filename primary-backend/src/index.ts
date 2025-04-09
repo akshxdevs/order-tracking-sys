@@ -14,7 +14,7 @@ app.use(express.json());
 app.use(cors());
 
 app.use("/api/v1/user",userRouter);
-app.use("/api/v1",orderRouter);
+app.use("/api/v1/order",orderRouter);
 
 listenOrderUpdateStatus(ws);
 server.listen(PORT,()=>{

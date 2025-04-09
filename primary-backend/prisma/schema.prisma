@@ -34,7 +34,7 @@ model Restaurent {
 
 model DeliveryAgent{
   id String @id @default(uuid())
-  name String
+  name String?
   phoneNo String
   isOnline Boolean @default(false)
   orders Order[]

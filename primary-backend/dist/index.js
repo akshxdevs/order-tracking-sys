@@ -17,7 +17,7 @@ const ws = (0, socket_1.setUpWebSocket)(server);
 app.use(express_1.default.json());
 app.use((0, cors_1.default)());
 app.use("/api/v1/user", user_1.userRouter);
-app.use("/api/v1", order_1.orderRouter);
+app.use("/api/v1/order", order_1.orderRouter);
 (0, consumer_1.listenOrderUpdateStatus)(ws);
 server.listen(configt_1.PORT, () => {
     console.log(`server running on port ${configt_1.PORT}`);

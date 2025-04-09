@@ -3,6 +3,7 @@ import { prismaClient } from "./db/db";
 import { publishOrderStatus } from "./kafka/producer";
 import { OrderStatus } from "@prisma/client";
 import { statusSchema } from "../types";
+import { io } from "socket.io-client";
 
 const router = Router();
 
@@ -54,11 +55,57 @@ router.post("/place-order",async(req,res)=>{
 router.patch('/orders/:id/status', async (req, res) => {
     try {
         const { id } = req.params;
+        const socket = io("http://localhost:3000");
+        socket.on("connect", async() => {
+        console.log("Connected:", socket.id);
+        socket.emit("join-order", String(id));
+
+        socket.on("order-status-update", (data) => {
+            console.log("Order Status Update:", data);
+        });
+        });
+        socket.on("disconnect", () => {
+        console.log("Disconnected");
+        });
         const parsedBody = statusSchema.safeParse(req.body);
         if (!parsedBody.success) return res.status(403).json({message:"Invalid Inputs",Error:parsedBody.error.errors})
         const order = await prismaClient.order.update({ where: { id }, data: { status:parsedBody.data.status } });
         await publishOrderStatus(order.id, order.status);
         res.json(order);
+    } catch (err) {
+        console.error(err);
+        res.status(411).json({message:"Something Went Wrong!"});
+    }
+  });
+  router.get("/delivery/status/:id",async(req,res)=>{
+    try {
+        const id = req.params.id
+        const getOrderStatus = await prismaClient.order.findFirst({
+            where:{
+                deliveryId:id
+            }
+        })
+        if (getOrderStatus) {
+            res.json({
+                message:"Order Status Details fetched!!",
+                details:getOrderStatus
+            })
+        }
+    } catch (err) {
+        console.error(err);
+        res.status(411).json({message:"Something Went Wrong!"});
+    }
+  });
+  router.get("/all-orders/status",async(req,res)=>{
+    try {
+        const getAllOrders = await prismaClient.order.findMany({
+        })
+        if (getAllOrders) {
+            res.json({
+                message:"Order Status Details fetched!!",
+                details:getAllOrders
+            })
+        }
     } catch (err) {
         console.error(err);
         res.status(411).json({message:"Something Went Wrong!"});
