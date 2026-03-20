@@ -17,7 +17,7 @@ export const setUpWebSocket = (server: http.Server) => {
     });
 
     socket.on("disconnect", () => {
-      console.log("User Disconnected");
+      console.log("User Disconnected:", socket.id);
     });
   });
 
