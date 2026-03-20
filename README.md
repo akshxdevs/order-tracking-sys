@@ -2,6 +2,11 @@
 
 Backend service for OTP-based order placement, restaurant acceptance, delivery assignment, and live order status updates.
 
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)
+![Express](https://img.shields.io/badge/Express-5.x-000000?logo=express&logoColor=white)
+![Prisma](https://img.shields.io/badge/Prisma-6.x-2D3748?logo=prisma&logoColor=white)
+![License](https://img.shields.io/badge/License-ISC-blue)
+
 ## Overview
 
 This repository currently contains the `primary-backend` service and local infrastructure definitions. The service exposes an Express API backed by PostgreSQL via Prisma, uses Redis for OTP storage and transient order state, publishes order status events through Kafka, and broadcasts live updates with Socket.IO.
