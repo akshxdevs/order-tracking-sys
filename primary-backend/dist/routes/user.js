@@ -8,205 +8,145 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.userRouter = void 0;
 const express_1 = require("express");
-const db_1 = require("./db/db");
-const ioredis_1 = __importDefault(require("ioredis"));
-const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-const configt_1 = require("../configt");
+const db_1 = require("../lib/db");
+const redis_1 = require("../lib/redis");
+const auth_1 = require("../lib/auth");
+const asyncHandler_1 = require("../middleware/asyncHandler");
+const types_1 = require("../types");
 const router = (0, express_1.Router)();
-const redis = new ioredis_1.default();
 const OTP_LIMIT = 3;
 const OTP_EXPIRY = 100;
-router.post("/login", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        const { phoneNo } = req.body;
-        const generateOtp = String((Math.floor(Math.random() * 1000000))).padStart(6, "7");
-        const optKey = `otp:${String(phoneNo)}`;
-        const otpReqCnts = yield redis.get(`otp_counts:${phoneNo}`);
-        if (otpReqCnts && Number(otpReqCnts) >= OTP_LIMIT) {
-            res.json({ message: "Too Many request!!" });
-        }
-        yield redis.setex(optKey, OTP_EXPIRY, generateOtp);
-        yield redis.incr(`otp_count:${phoneNo}`);
-        yield redis.expire(`opt_count:${phoneNo}`, OTP_EXPIRY);
-        res.json({ message: `Otp: ${generateOtp} Generated Sucessfully for ${phoneNo}` });
+router.post("/login", (0, asyncHandler_1.asyncHandler)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const parsed = types_1.loginSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.errors });
     }
-    catch (error) {
-        res.status(411).json({ message: "Something Went Wrong!!" });
+    const { phoneNo } = parsed.data;
+    const otpCountKey = `otp_count:${phoneNo}`;
+    const otpKey = `otp:${phoneNo}`;
+    const otpReqCnts = yield redis_1.redis.get(otpCountKey);
+    if (otpReqCnts && Number(otpReqCnts) >= OTP_LIMIT) {
+        return res.status(429).json({ message: "Too many requests, try again later" });
     }
-}));
-router.post("/login/customer/verify-otp", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        const { phoneNo, userRole, otp, } = req.body;
-        const role = String(userRole).toLocaleLowerCase();
-        const generateUsername = String(role + (Math.floor(Math.random() * 1000000))).padStart(6, "7");
-        if (!phoneNo || !otp) {
-            return res.status(403).json({ message: "Invalid inputs!" });
-        }
-        const storedOtp = yield redis.get(`otp:${phoneNo}`);
-        console.log(storedOtp);
-        if (!storedOtp || storedOtp !== otp) {
-            return res.status(401).json({ message: "Invalid or expired OTP!" });
-        }
-        const existingUser = yield db_1.prismaClient.user.findFirst({
-            where: {
-                phoneNo: phoneNo
-            }
+    const otp = (0, auth_1.generateOtp)();
+    const pipeline = redis_1.redis.pipeline();
+    pipeline.setex(otpKey, OTP_EXPIRY, otp);
+    pipeline.incr(otpCountKey);
+    if (!otpReqCnts) {
+        pipeline.expire(otpCountKey, OTP_EXPIRY);
+    }
+    yield pipeline.exec();
+    res.json({ message: `OTP generated successfully for ${phoneNo}` });
+})));
+router.post("/login/customer/verify-otp", (0, asyncHandler_1.asyncHandler)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const parsed = types_1.verifyOtpSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.errors });
+    }
+    const { phoneNo, otp } = parsed.data;
+    const valid = yield (0, auth_1.verifyAndClearOtp)(phoneNo, otp);
+    if (!valid) {
+        return res.status(401).json({ message: "Invalid or expired OTP" });
+    }
+    const existingUser = yield db_1.prismaClient.user.findUnique({
+        where: { phoneNo },
+    });
+    if (existingUser) {
+        const token = (0, auth_1.generateToken)(existingUser.id, "customer");
+        return res.json({
+            message: "User login successful",
+            token,
+            user: existingUser,
         });
-        console.log(userRole);
-        if (existingUser) {
-            const userToken = jsonwebtoken_1.default.sign({
-                id: existingUser === null || existingUser === void 0 ? void 0 : existingUser.id
-            }, configt_1.JWT_SECRET, { expiresIn: '7d' });
-            yield redis.del(`otp:${phoneNo}`);
-            yield redis.del(`otp_count:${phoneNo}`);
-            res.json({
-                message: "User Login Successfully!",
-                token: userToken,
-                user: existingUser
-            });
-        }
-        if (!existingUser) {
-            const user = yield db_1.prismaClient.user.create({
-                data: {
-                    username: generateUsername,
-                    userRole: userRole,
-                    phoneNo: phoneNo
-                }
-            });
-            const token = jsonwebtoken_1.default.sign({
-                id: user.id
-            }, configt_1.JWT_SECRET, { expiresIn: '7d' });
-            yield redis.del(`otp:${phoneNo}`);
-            yield redis.del(`otp_count:${phoneNo}`);
-            return res.json({
-                message: "User Login Successfully!",
-                token: token,
-                user: user
-            });
-        }
     }
-    catch (error) {
-        res.status(411).json({ message: "Something Went Wrong!!" });
+    const user = yield db_1.prismaClient.user.create({
+        data: {
+            username: (0, auth_1.generateRandomName)("customer"),
+            userRole: "CUSTOMER",
+            phoneNo,
+        },
+    });
+    const token = (0, auth_1.generateToken)(user.id, "customer");
+    return res.json({
+        message: "User registered and logged in successfully",
+        token,
+        user,
+    });
+})));
+router.post("/login/delivery/verify-otp", (0, asyncHandler_1.asyncHandler)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const parsed = types_1.verifyOtpSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.errors });
     }
-}));
-router.post("/login/delivery/verify-otp", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        const { phoneNo, otp, userRole } = req.body;
-        const role = String(userRole).toLocaleLowerCase();
-        const generateUsername = String(role + (Math.floor(Math.random() * 1000000))).padStart(6, "7");
-        if (!phoneNo || !otp) {
-            return res.status(403).json({ message: "Invalid inputs!" });
-        }
-        const storedOtp = yield redis.get(`otp:${phoneNo}`);
-        console.log(storedOtp);
-        if (!storedOtp || storedOtp !== otp) {
-            return res.status(401).json({ message: "Invalid or expired OTP!" });
-        }
-        const existingDelivery = yield db_1.prismaClient.deliveryAgent.findFirst({
-            where: {
-                phoneNo: phoneNo,
-            }, include: {
-                orders: true
-            }
+    const { phoneNo, otp } = parsed.data;
+    const valid = yield (0, auth_1.verifyAndClearOtp)(phoneNo, otp);
+    if (!valid) {
+        return res.status(401).json({ message: "Invalid or expired OTP" });
+    }
+    const existingDelivery = yield db_1.prismaClient.deliveryAgent.findFirst({
+        where: { phoneNo },
+    });
+    if (existingDelivery) {
+        yield db_1.prismaClient.deliveryAgent.update({
+            where: { id: existingDelivery.id },
+            data: { isOnline: true },
         });
-        if (existingDelivery) {
-            yield db_1.prismaClient.deliveryAgent.update({
-                where: { id: existingDelivery.id }, data: {
-                    isOnline: true
-                }
-            });
-            const deliveryToken = jsonwebtoken_1.default.sign({
-                id: existingDelivery === null || existingDelivery === void 0 ? void 0 : existingDelivery.id
-            }, configt_1.JWT_SECRET, { expiresIn: '7d' });
-            yield redis.del(`otp:${phoneNo}`);
-            yield redis.del(`otp_count:${phoneNo}`);
-            res.json({
-                message: "Delivery Login Successfully!",
-                token: deliveryToken,
-                delivery: existingDelivery
-            });
-        }
-        if (!existingDelivery) {
-            const delivery = yield db_1.prismaClient.deliveryAgent.create({
-                data: {
-                    phoneNo: phoneNo,
-                    name: generateUsername,
-                    isOnline: true
-                }
-            });
-            const deliveryToken = jsonwebtoken_1.default.sign({
-                id: delivery.id
-            }, configt_1.JWT_SECRET, { expiresIn: '7d' });
-            yield redis.del(`otp:${phoneNo}`);
-            yield redis.del(`otp_count:${phoneNo}`);
-            return res.json({
-                message: "Delivery Login Successfully!",
-                token: deliveryToken,
-                delivery: delivery
-            });
-        }
-    }
-    catch (error) {
-        res.status(411).json({ message: "Something Went Wrong!!" });
-    }
-}));
-router.post("/login/admin/verify-otp", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        const { phoneNo, userRole, otp, } = req.body;
-        const role = String(userRole).toLocaleLowerCase();
-        const generateUsername = String(role + (Math.floor(Math.random() * 1000000))).padStart(6, "7");
-        if (!phoneNo || !otp) {
-            return res.status(403).json({ message: "Invalid inputs!" });
-        }
-        const storedOtp = yield redis.get(`otp:${phoneNo}`);
-        console.log(storedOtp);
-        if (!storedOtp || storedOtp !== otp) {
-            return res.status(401).json({ message: "Invalid or expired OTP!" });
-        }
-        const existingRestaurent = yield db_1.prismaClient.restaurent.findFirst({
-            where: {
-                resPhoneNo: phoneNo,
-            }
+        const token = (0, auth_1.generateToken)(existingDelivery.id, "delivery");
+        return res.json({
+            message: "Delivery login successful",
+            token,
+            delivery: existingDelivery,
         });
-        if (existingRestaurent) {
-            const restaurentToken = jsonwebtoken_1.default.sign({
-                id: existingRestaurent === null || existingRestaurent === void 0 ? void 0 : existingRestaurent.id
-            }, configt_1.JWT_SECRET, { expiresIn: '7d' });
-            yield redis.del(`otp:${phoneNo}`);
-            yield redis.del(`otp_count:${phoneNo}`);
-            res.json({
-                message: "Restaurent Login Successfully!",
-                token: restaurentToken,
-                restaurent: existingRestaurent
-            });
-        }
-        if (!existingRestaurent) {
-            const admin = yield db_1.prismaClient.restaurent.create({
-                data: {
-                    resName: generateUsername,
-                    resPhoneNo: phoneNo
-                }
-            });
-            const adminToken = jsonwebtoken_1.default.sign({
-                id: admin.id
-            }, configt_1.JWT_SECRET, { expiresIn: '7d' });
-            yield redis.del(`otp:${phoneNo}`);
-            yield redis.del(`otp_count:${phoneNo}`);
-            return res.json({
-                message: "Restaurent Login Successfully!",
-                token: adminToken,
-                admin: admin
-            });
-        }
     }
-    catch (error) {
-        res.status(411).json({ message: "Something Went Wrong!!" });
+    const delivery = yield db_1.prismaClient.deliveryAgent.create({
+        data: {
+            phoneNo,
+            name: (0, auth_1.generateRandomName)("delivery"),
+            isOnline: true,
+        },
+    });
+    const token = (0, auth_1.generateToken)(delivery.id, "delivery");
+    return res.json({
+        message: "Delivery registered and logged in successfully",
+        token,
+        delivery,
+    });
+})));
+router.post("/login/admin/verify-otp", (0, asyncHandler_1.asyncHandler)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const parsed = types_1.verifyOtpSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.errors });
     }
-}));
+    const { phoneNo, otp } = parsed.data;
+    const valid = yield (0, auth_1.verifyAndClearOtp)(phoneNo, otp);
+    if (!valid) {
+        return res.status(401).json({ message: "Invalid or expired OTP" });
+    }
+    const existingRestaurent = yield db_1.prismaClient.restaurent.findFirst({
+        where: { resPhoneNo: phoneNo },
+    });
+    if (existingRestaurent) {
+        const token = (0, auth_1.generateToken)(existingRestaurent.id, "admin");
+        return res.json({
+            message: "Restaurant login successful",
+            token,
+            restaurent: existingRestaurent,
+        });
+    }
+    const admin = yield db_1.prismaClient.restaurent.create({
+        data: {
+            resName: (0, auth_1.generateRandomName)("restaurant"),
+            resPhoneNo: phoneNo,
+        },
+    });
+    const token = (0, auth_1.generateToken)(admin.id, "admin");
+    return res.json({
+        message: "Restaurant registered and logged in successfully",
+        token,
+        restaurent: admin,
+    });
+})));
 exports.userRouter = router;
