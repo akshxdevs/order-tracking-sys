@@ -1,260 +1,216 @@
-Order Tracking System
-=====================
+# Order Tracking System
 
-A full-stack web application for real-time e-commerce order tracking, inventory management, and delivery notifications. Built with Next.js, Node.js, and MongoDB for scalable order lifecycle management.
+Backend service for OTP-based order placement, restaurant acceptance, delivery assignment, and live order status updates.
 
-This system empowers e-commerce businesses to provide customers with transparent order updates, automate status notifications via email/SMS, and streamline warehouse operations---reducing support tickets by up to 40% through self-service tracking.
+## Overview
 
-* * * * *
+This repository currently contains the `primary-backend` service and local infrastructure definitions. The service exposes an Express API backed by PostgreSQL via Prisma, uses Redis for OTP storage and transient order state, publishes order status events through Kafka, and broadcasts live updates with Socket.IO.
 
-Let's walk through the architecture:
-------------------------------------
+The order flow implemented in the codebase is:
 
-For this application, we use a modular backend with RESTful APIs and a responsive frontend. The core entity is the Order model in MongoDB:
+- Customer requests an OTP and signs in.
+- Customer places an order for an open restaurant.
+- Restaurant accepts or rejects the order.
+- Accepted orders are assigned to an online delivery agent.
+- Delivery agents move orders from `ACCEPTED` to `PICKED` to `DELIVERED`.
+- Customers can cancel only while the order is still `PLACED`.
 
-javascript
+## Tech Stack
 
-```
-// models/Order.js
-const mongoose = require('mongoose');
+- Node.js with TypeScript
+- Express 5
+- Prisma ORM
+- PostgreSQL
+- Redis
+- Kafka
+- Socket.IO
+- Zod
 
-const orderSchema = new mongoose.Schema({
-  orderId: { type: String, required: true, unique: true },
-  customer: {
-    name: String,
-    email: String,
-    phone: String,
-  },
-  items: [{
-    productId: String,
-    name: String,
-    quantity: Number,
-    price: Number,
-  }],
-  totalAmount: { type: Number, required: true },
-  status: {
-    type: String,
-    enum: ['placed', 'processing', 'shipped', 'in-transit', 'delivered', 'cancelled'],
-    default: 'placed'
-  },
-  trackingNumber: String,
-  estimatedDelivery: Date,
-  actualDelivery: Date,
-  address: {
-    street: String,
-    city: String,
-    state: String,
-    zip: String,
-    country: String,
-  },
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
-});
+## Project Structure
 
-module.exports = mongoose.model('Order', orderSchema);
+```text
+.
+├── docker-compose.yml
+├── README.md
+└── primary-backend
+    ├── package.json
+    ├── prisma
+    │   ├── migrations
+    │   └── schema.prisma
+    ├── src
+    │   ├── config.ts
+    │   ├── index.ts
+    │   ├── kafka
+    │   ├── lib
+    │   ├── middleware
+    │   ├── prisma
+    │   ├── routes
+    │   ├── socket.ts
+    │   └── types
+    └── test
+        └── ws-test.js
 ```
 
-The Order model captures the full lifecycle:
+## Prerequisites
 
--   orderId: Unique identifier for tracking.
--   customer: Buyer details for notifications.
--   items: Array of purchased products.
--   totalAmount: Order value.
--   status: Current workflow stage with timestamps.
--   trackingNumber: Carrier-specific ID.
--   estimatedDelivery / actualDelivery: Key dates.
--   address: Shipping details.
--   Timestamps for auditing changes.
+- Node.js and npm
+- PostgreSQL
+- Redis
+- Kafka
 
-* * * * *
+For local development, `docker-compose.yml` provides PostgreSQL, Redis, ZooKeeper, and Kafka containers.
 
-Users can create and track orders via the frontend. For that, we set up API routes in Next.js:
-----------------------------------------------------------------------------------------------
+## Setup
 
-Failed to load image
+1. Start the local services:
 
-[View link](order_imgs/create-order.png)
-
-javascript
-
-```
-// pages/api/orders.js
-import dbConnect from '../../lib/dbConnect';
-import Order from '../../models/Order';
-
-export default async function handler(req, res) {
-  await dbConnect();
-  const { method } = req;
-
-  switch (method) {
-    case 'POST':
-      try {
-        const order = await Order.create(req.body);
-        // Send confirmation email
-        await sendEmail(order.customer.email, 'Order Confirmation', `Your order ${order.orderId} has been placed!`);
-        res.status(201).json({ success: true, data: order });
-      } catch (error) {
-        res.status(400).json({ success: false });
-      }
-      break;
-    case 'GET':
-      try {
-        const orders = await Order.find({}).sort({ createdAt: -1 });
-        res.status(200).json({ success: true, data: orders });
-      } catch (error) {
-        res.status(400).json({ success: false });
-      }
-      break;
-    default:
-      res.setHeader('Allow', ['GET', 'POST']);
-      res.status(405).end(`Method ${method} Not Allowed`);
-  }
-}
+```bash
+docker compose up -d
 ```
 
-Let's examine the components in this API:
+2. Install backend dependencies:
 
--   **POST /api/orders**: Creates a new order document in MongoDB. Validates input, generates orderId (e.g., via UUID), sets initial status to 'placed', and triggers an email notification using Nodemailer.
--   **GET /api/orders**: Fetches all orders for admin dashboard, sorted by recency. Includes filters for status/customer.
--   **dbConnect**: Utility to handle MongoDB connections (singleton pattern for efficiency).
--   **sendEmail**: Integrates with services like SendGrid for automated alerts.
-
-Additional routes: PUT /api/orders/[id] for status updates (e.g., 'shipped' → assign trackingNumber), GET /api/orders/track/[orderId] for public tracking.
-
-* * * * *
-
-Admins can update order status and notify customers. For that, we create the following endpoint:
-------------------------------------------------------------------------------------------------
-
-Failed to load image
-
-[View link](order_imgs/update-status.png)
-
-javascript
-
-```
-// pages/api/orders/[id].js
-import dbConnect from '../../../lib/dbConnect';
-import Order from '../../../models/Order';
-
-export default async function handler(req, res) {
-  await dbConnect();
-  const { method } = req;
-  const { id } = req.query;
-
-  switch (method) {
-    case 'PUT':
-      try {
-        const order = await Order.findByIdAndUpdate(id, req.body, { new: true, runValidators: true });
-        if (!order) return res.status(404).json({ success: false });
-
-        // Notify customer on status change
-        if (req.body.status !== order.status) {
-          await sendNotification(order.customer, `Order ${order.orderId} is now ${req.body.status}`);
-          order.updatedAt = new Date();
-          await order.save();
-        }
-        res.status(200).json({ success: true, data: order });
-      } catch (error) {
-        res.status(400).json({ success: false, error: error.message });
-      }
-      break;
-    case 'GET':
-      try {
-        const order = await Order.findById(id);
-        if (!order) return res.status(404).json({ success: false });
-        res.status(200).json({ success: true, data: order });
-      } catch (error) {
-        res.status(400).json({ success: false });
-      }
-      break;
-    default:
-      res.setHeader('Allow', ['GET', 'PUT']);
-      res.status(405).end(`Method ${method} Not Allowed`);
-  }
-}
+```bash
+cd primary-backend
+npm install
 ```
 
-In this endpoint, we handle updates and fetches:
+3. Create a local environment file from the sample:
 
--   **PUT /api/orders/[id]**: Updates status, address, or delivery dates. Triggers SMS/email via Twilio/Nodemailer on changes. Uses Mongoose middleware to auto-update updatedAt.
--   **GET /api/orders/[id]**: Retrieves single order for tracking page, exposing only public fields (e.g., status, trackingNumber).
--   **sendNotification**: Modular function for email/SMS/push, integrated with Firebase for real-time if needed.
--   **Middleware**: Pre-save hook in schema auto-updates timestamps and validates status transitions (e.g., can't go from 'delivered' to 'shipped').
-
-For public tracking, a frontend route /track/[orderId] queries this API without auth.
-
-* * * * *
-
-Customers can view order history and track deliveries. For that, we create the following frontend component:
-------------------------------------------------------------------------------------------------------------
-
-Failed to load image
-
-[View link](order_imgs/track-dashboard.png)
-
-javascript
-
-```
-// components/TrackingDashboard.js
-import { useState, useEffect } from 'react';
-import axios from 'axios';
-
-export default function TrackingDashboard({ orderId }) {
-  const [order, setOrder] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchOrder = async () => {
-      try {
-        const res = await axios.get(`/api/orders/track/${orderId}`);
-        setOrder(res.data.data);
-      } catch (error) {
-        console.error('Tracking fetch failed:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchOrder();
-  }, [orderId]);
-
-  if (loading) return <div>Loading order details...</div>;
-  if (!order) return <div>Order not found.</div>;
-
-  return (
-    <div className="max-w-md mx-auto p-6 bg-white rounded-lg shadow-md">
-      <h2 className="text-2xl font-bold mb-4">Track Order #{order.orderId}</h2>
-      <div className="space-y-2 mb-4">
-        <p><strong>Status:</strong> {order.status}</p>
-        {order.trackingNumber && <p><strong>Tracking:</strong> {order.trackingNumber}</p>}
-        <p><strong>Estimated Delivery:</strong> {new Date(order.estimatedDelivery).toLocaleDateString()}</p>
-      </div>
-      <div className="border-t pt-4">
-        <h3 className="font-semibold mb-2">Order Items</h3>
-        <ul className="space-y-1">
-          {order.items.map((item, idx) => (
-            <li key={idx} className="text-sm">
-              {item.name} x{item.quantity} - ${item.price * item.quantity}
-            </li>
-          ))}
-        </ul>
-        <p className="font-bold mt-2">Total: ${order.totalAmount}</p>
-      </div>
-    </div>
-  );
-}
+```bash
+cp .env.example .env
 ```
 
-In this component, we fetch and display:
+4. Apply Prisma schema changes and generate the client for your database.
 
--   **Real-time Status**: Pulls from API; could poll or use WebSockets (via Socket.io) for live updates.
--   **Customer View**: Public access---no login required for basic tracking.
--   **UI Elements**: Responsive with Tailwind CSS; progress bar for status visualization.
--   **Error Handling**: Graceful fallbacks for invalid IDs.
--   **Integration**: Embeddable widget for e-commerce sites; customizable themes.
+5. Optionally seed sample data:
 
-Additional features: Admin dashboard at /admin with auth (NextAuth.js), inventory sync, and analytics (e.g., Chart.js for delivery metrics).
+```bash
+npm run seed
+```
+
+## Configuration
+
+The backend reads these variables from `primary-backend/.env`:
+
+```env
+PORT=3000
+JWT_SECRET=your-secret-key-here
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/order_tracking
+REDIS_URL=redis://localhost:6379
+KAFKA_BROKER=localhost:9092
+```
+
+## Development Commands
+
+From `primary-backend/`:
+
+```bash
+npm run build
+npm run dev
+npm run start
+npm run seed
+```
+
+## API Endpoints
+
+Base paths:
+
+- `/api/v1/user`
+- `/api/v1/order`
+
+Authentication:
+
+- `POST /api/v1/user/login`
+- `POST /api/v1/user/login/customer/verify-otp`
+- `POST /api/v1/user/login/delivery/verify-otp`
+- `POST /api/v1/user/login/admin/verify-otp`
+
+Order lifecycle:
+
+- `POST /api/v1/order/place-order`
+- `GET /api/v1/order/my-orders`
+- `PATCH /api/v1/order/orders/:id/cancel`
+- `PATCH /api/v1/order/orders/:id/accept`
+- `PATCH /api/v1/order/orders/:id/reject`
+- `PATCH /api/v1/order/orders/:id/status`
+
+Operational views:
+
+- `GET /api/v1/order/orders/restaurent/my-orders`
+- `GET /api/v1/order/orders/delivery/my-orders`
+- `GET /api/v1/order/all-orders/status`
+- `GET /api/v1/order/delivery-available`
+- `GET /api/v1/order/restaurent-available`
+- `GET /api/v1/order/placed-orders`
+- `GET /health`
+
+Most order routes require a bearer token and role-specific access enforced by `authMiddleware` and `requireRole`.
+
+## Example Requests
+
+Request an OTP:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/user/login \
+  -H "Content-Type: application/json" \
+  -d '{"phoneNo":"9999999999"}'
+```
+
+Verify a customer OTP:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/user/login/customer/verify-otp \
+  -H "Content-Type: application/json" \
+  -d '{"phoneNo":"9999999999","otp":"123456"}'
+```
+
+Place an order:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/order/place-order \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <customer-token>" \
+  -d '{
+    "restaurentId":"<restaurant-id>",
+    "totalPrice":450,
+    "items":[
+      {"name":"Burger","quantity":2,"price":150},
+      {"name":"Fries","quantity":1,"price":150}
+    ]
+  }'
+```
+
+Update delivery status:
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/order/orders/<order-id>/status \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <delivery-token>" \
+  -d '{"status":"PICKED"}'
+```
+
+## Architecture Notes
+
+- `src/routes/user.ts` handles OTP login and role-based token issuance.
+- `src/routes/order.ts` owns order placement, cancellation, acceptance, rejection, and delivery progression.
+- `src/lib` contains shared clients and auth helpers.
+- `src/kafka` publishes and consumes order status events.
+- `src/socket.ts` exposes a Socket.IO server that lets clients join order-specific rooms.
+- Kafka consumer updates are emitted on the `order-status-update` topic and forwarded to connected Socket.IO clients.
+
+## Testing
+
+There is no automated test script in `primary-backend/package.json` yet.
+
+The repository includes a manual Socket.IO smoke script at `primary-backend/test/ws-test.js` that connects to `http://localhost:3000`, joins an order room, and logs live status events.
+
+## Current Limitations
+
+- The repository does not include an automated test suite.
+- Prisma migration files in the repo should be kept in sync with schema changes before relying on a fresh environment setup.
+- The root repository currently contains the backend service only; the previous frontend app has been removed.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This repository does not currently include a root license file. The backend package is marked as `ISC` in `primary-backend/package.json`.
