@@ -1,206 +1,272 @@
 import { Router } from "express";
-import { prismaClient } from "./db/db";
-import { publishOrderStatus } from "./kafka/producer";
+import { prismaClient } from "../lib/db";
+import { publishOrderStatus } from "../kafka/producer";
 import { OrderStatus } from "@prisma/client";
-import { statusSchema } from "../types";
-import { io } from "socket.io-client";
+import { statusSchema, placeOrderSchema, paginationSchema } from "../types";
+import { authMiddleware, requireRole, AuthRequest } from "../middleware/auth";
+import { asyncHandler } from "../middleware/asyncHandler";
 
 const router = Router();
 
-router.post("/place-order",async(req,res)=>{
-    try {
-        const { restaurentId, userId, deliveryId, totalPrice, items } = req.body;
-        const  [restaurent,user,delivery] = await Promise.all([
-            prismaClient.restaurent.findUnique({where:{id:restaurentId}}),
-            prismaClient.user.findUnique({where:{id:userId}}),
-            prismaClient.deliveryAgent.findUnique({where:{id:deliveryId}}),
-        ]);
-        if (!restaurent) return res.status(404).json({message:"Invalid Restaurent Id!"});
-        if (!user) return res.status(404).json({ message: "Invalid userId" });
-        if (!delivery) return res.status(404).json({ message: "Invalid deliveryId" });
+// Customer places an order (no deliveryId needed — auto-assigned on accept)
+router.post("/place-order", authMiddleware, requireRole("customer"), asyncHandler(async (req: AuthRequest, res) => {
+    const parsed = placeOrderSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.errors });
+    }
+    const { restaurentId, totalPrice, items } = parsed.data;
+    const userId = req.userId!;
 
-        const order = await prismaClient.order.create({
-            data:{
-                userId:userId,
-                restaurentId:restaurentId,
-                deliveryId:deliveryId,
-                status:OrderStatus.PLACED,
-                totalPrice:totalPrice,
-                items:{
-                    create: items.map((item:any) => ({
-                        name:item.name,
-                        quantity:item.quantity,
-                        price:item.price
-                    })),
-                },
+    const [restaurent, user] = await Promise.all([
+        prismaClient.restaurent.findUnique({ where: { id: restaurentId } }),
+        prismaClient.user.findUnique({ where: { id: userId } }),
+    ]);
+
+    if (!restaurent) return res.status(404).json({ message: "Invalid restaurant ID" });
+    if (!user) return res.status(404).json({ message: "Invalid user ID" });
+    if (!restaurent.isOpen) return res.status(400).json({ message: "Restaurant is currently closed" });
+
+    const order = await prismaClient.order.create({
+        data: {
+            userId,
+            restaurentId,
+            status: OrderStatus.PLACED,
+            totalPrice,
+            items: {
+                create: items.map((item) => ({
+                    name: item.name,
+                    quantity: item.quantity,
+                    price: item.price,
+                })),
             },
-            include:{
-                items:true
-            }
-        })
-        await publishOrderStatus(order.id,order.status);
-        res.json({
-            message:"Order Placed Successfully!!",
-            order:order
-        })
-        if (!order) {
-            res.status(402).json({message:"Invalid Order"})
-        }
-    } catch (error) {
-        console.error(error);
-        res.status(411).json({message:"Something Went Wrong!"})
-    }
-})
+        },
+        include: { items: true },
+    });
 
-router.patch('/orders/:id/status', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const socket = io("http://localhost:3000");
-        socket.on("connect", async() => {
-        console.log("Connected:", socket.id);
-        socket.emit("join-order", String(id));
+    await publishOrderStatus(order.id, order.status);
+    res.status(201).json({
+        message: "Order placed successfully",
+        order,
+    });
+}));
 
-        socket.on("order-status-update", (data) => {
-            console.log("Order Status Update:", data);
-        });
-        });
-        socket.on("disconnect", () => {
-        console.log("Disconnected");
-        });
-        const parsedBody = statusSchema.safeParse(req.body);
-        if (!parsedBody.success) return res.status(403).json({message:"Invalid Inputs",Error:parsedBody.error.errors})
-        const order = await prismaClient.order.update({ where: { id }, data: { status:parsedBody.data.status } });
-        await publishOrderStatus(order.id, order.status);
-        res.json(order);
-    } catch (err) {
-        console.error(err);
-        res.status(411).json({message:"Something Went Wrong!"});
+// Customer views their own orders
+router.get("/my-orders", authMiddleware, requireRole("customer"), asyncHandler(async (req: AuthRequest, res) => {
+    const pagination = paginationSchema.safeParse(req.query);
+    const { page, limit } = pagination.success ? pagination.data : { page: 1, limit: 20 };
+
+    const orders = await prismaClient.order.findMany({
+        where: { userId: req.userId! },
+        include: { items: true, res: { select: { resName: true } } },
+        orderBy: { placed_at: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+    });
+    res.json({ message: "Your orders fetched", orders });
+}));
+
+// Customer cancels an order (only if PLACED — before restaurant accepts)
+router.patch("/orders/:id/cancel", authMiddleware, requireRole("customer"), asyncHandler(async (req: AuthRequest, res) => {
+    const { id } = req.params;
+    const userId = req.userId!;
+
+    const order = await prismaClient.order.findUnique({ where: { id } });
+    if (!order) {
+        return res.status(404).json({ message: "Order not found" });
     }
-  });
-  router.get("/delivery/status/:id",async(req,res)=>{
-    try {
-        const id = req.params.id
-        const getOrderStatus = await prismaClient.order.findFirst({
-            where:{
-                deliveryId:id
-            }
-        })
-        if (getOrderStatus) {
-            res.json({
-                message:"Order Status Details fetched!!",
-                details:getOrderStatus
-            })
-        }
-    } catch (err) {
-        console.error(err);
-        res.status(411).json({message:"Something Went Wrong!"});
+    if (order.userId !== userId) {
+        return res.status(403).json({ message: "This order does not belong to you" });
     }
-  });
-  router.get("/all-orders/status",async(req,res)=>{
-    try {
-        const getAllOrders = await prismaClient.order.findMany({
-        })
-        if (getAllOrders) {
-            res.json({
-                message:"Order Status Details fetched!!",
-                details:getAllOrders
-            })
-        }
-    } catch (err) {
-        console.error(err);
-        res.status(411).json({message:"Something Went Wrong!"});
+    if (order.status !== OrderStatus.PLACED) {
+        return res.status(400).json({ message: `Cannot cancel order with status ${order.status}. Only PLACED orders can be cancelled` });
     }
-  });
-  router.get("/delivery-available",async(req,res)=>{
-    try {
-        const deliveryAvailable = await prismaClient.deliveryAgent.findMany({
-            where:{
-                isOnline:true
-            }
-        })
-        if (deliveryAvailable) {
-            res.json({
-                message:"Delivery Agent Ids fetched!!",
-                details:deliveryAvailable
-            })
-        }
-    } catch (err) {
-        console.error(err);
-        res.status(411).json({message:"Something Went Wrong!"});
+
+    const updated = await prismaClient.order.update({
+        where: { id },
+        data: { status: OrderStatus.CANCELLED },
+        include: { items: true },
+    });
+
+    await publishOrderStatus(updated.id, updated.status);
+    res.json({ message: "Order cancelled successfully", order: updated });
+}));
+
+// Restaurant accepts an order — auto-assigns an available delivery agent
+router.patch("/orders/:id/accept", authMiddleware, requireRole("admin"), asyncHandler(async (req: AuthRequest, res) => {
+    const { id } = req.params;
+    const restaurentId = req.userId!;
+
+    const order = await prismaClient.order.findUnique({ where: { id } });
+    if (!order) {
+        return res.status(404).json({ message: "Order not found" });
     }
-  });
-  router.get("/restaurent-available",async(req,res)=>{
-    try {
-        const restaurentAvailable = await prismaClient.restaurent.findMany({
-            where:{
-                isOpen:true
-            }
-        })
-        if (restaurentAvailable) {
-            res.json({
-                message:"Delivery Agent Ids fetched!!",
-                details:restaurentAvailable
-            })
-        }
-    } catch (err) {
-        console.error(err);
-        res.status(411).json({message:"Something Went Wrong!"});
+    if (order.restaurentId !== restaurentId) {
+        return res.status(403).json({ message: "This order does not belong to your restaurant" });
     }
-  });
-  router.get("/orders/restaurent/:id/status",async(req,res)=>{
-    try {
-        const { id } = req.params
-        const getOrders = await prismaClient.order.findMany({
-            where:{
-                restaurentId:id
-            }
-        })
-        if (getOrders) {
-            res.json({
-                message:"Order Details fetched!!",
-                orderDetails:getOrders
-            })
-        }
-    } catch (err) {
-        console.error(err);
-        res.status(411).json({message:"Something Went Wrong!"});
+    if (order.status !== OrderStatus.PLACED) {
+        return res.status(400).json({ message: `Cannot accept order with status ${order.status}` });
     }
-  });
-  router.get("/orders/delivery/:id/status",async(req,res)=>{
-    try {
-        const { id } = req.params
-        const getOrders = await prismaClient.order.findMany({
-            where:{
-                deliveryId:id
-            }
-        })
-        if (getOrders) {
-            res.json({
-                message:"Order Details fetched!!",
-                orderDetails:getOrders
-            })
-        }
-    } catch (err) {
-        console.error(err);
-        res.status(411).json({message:"Something Went Wrong!"});
+
+    // Auto-assign an available delivery agent
+    const availableAgent = await prismaClient.deliveryAgent.findFirst({
+        where: { isOnline: true },
+        orderBy: { orders: { _count: "asc" } },
+    });
+    if (!availableAgent) {
+        return res.status(503).json({ message: "No delivery agents available right now. Try again later" });
     }
-  });
-  router.get("/placed-orders",async(req,res)=>{
-    try {
-        const getOrders = await prismaClient.order.findMany({
-            where:{
-                status:"PLACED"
-            }
-        })
-        if (getOrders) {
-            res.json({
-                message:"Orders fetched!!",
-                orders:getOrders
-            })
-        }
-    } catch (err) {
-        console.error(err);
-        res.status(411).json({message:"Something Went Wrong!"});
+
+    const updated = await prismaClient.order.update({
+        where: { id },
+        data: {
+            status: OrderStatus.ACCEPTED,
+            deliveryId: availableAgent.id,
+        },
+        include: { items: true, deliveryAgent: { select: { name: true, phoneNo: true } } },
+    });
+
+    await publishOrderStatus(updated.id, updated.status);
+    res.json({ message: "Order accepted and delivery agent assigned", order: updated });
+}));
+
+// Restaurant rejects an order
+router.patch("/orders/:id/reject", authMiddleware, requireRole("admin"), asyncHandler(async (req: AuthRequest, res) => {
+    const { id } = req.params;
+    const restaurentId = req.userId!;
+
+    const order = await prismaClient.order.findUnique({ where: { id } });
+    if (!order) {
+        return res.status(404).json({ message: "Order not found" });
     }
-  });
+    if (order.restaurentId !== restaurentId) {
+        return res.status(403).json({ message: "This order does not belong to your restaurant" });
+    }
+    if (order.status !== OrderStatus.PLACED) {
+        return res.status(400).json({ message: `Cannot reject order with status ${order.status}` });
+    }
+
+    const updated = await prismaClient.order.update({
+        where: { id },
+        data: { status: OrderStatus.REJECTED },
+        include: { items: true },
+    });
+
+    await publishOrderStatus(updated.id, updated.status);
+    res.json({ message: "Order rejected", order: updated });
+}));
+
+// Delivery agent updates order status (PICKED, DELIVERED)
+router.patch("/orders/:id/status", authMiddleware, requireRole("delivery"), asyncHandler(async (req: AuthRequest, res) => {
+    const { id } = req.params;
+    const deliveryId = req.userId!;
+
+    const parsedBody = statusSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        return res.status(400).json({ message: "Invalid status", errors: parsedBody.error.errors });
+    }
+
+    const allowedStatuses: OrderStatus[] = [OrderStatus.PICKED, OrderStatus.DELIVERED];
+    if (!allowedStatuses.includes(parsedBody.data.status)) {
+        return res.status(400).json({ message: "Delivery agents can only set PICKED or DELIVERED" });
+    }
+
+    const order = await prismaClient.order.findUnique({ where: { id } });
+    if (!order) {
+        return res.status(404).json({ message: "Order not found" });
+    }
+    if (order.deliveryId !== deliveryId) {
+        return res.status(403).json({ message: "This order is not assigned to you" });
+    }
+
+    // Enforce status transitions: ACCEPTED→PICKED→DELIVERED
+    if (parsedBody.data.status === OrderStatus.PICKED && order.status !== OrderStatus.ACCEPTED) {
+        return res.status(400).json({ message: "Can only pick up ACCEPTED orders" });
+    }
+    if (parsedBody.data.status === OrderStatus.DELIVERED && order.status !== OrderStatus.PICKED) {
+        return res.status(400).json({ message: "Can only deliver PICKED orders" });
+    }
+
+    const updated = await prismaClient.order.update({
+        where: { id },
+        data: { status: parsedBody.data.status },
+    });
+    await publishOrderStatus(updated.id, updated.status);
+    res.json({ message: "Order status updated", order: updated });
+}));
+
+// Restaurant views its incoming orders
+router.get("/orders/restaurent/my-orders", authMiddleware, requireRole("admin"), asyncHandler(async (req: AuthRequest, res) => {
+    const pagination = paginationSchema.safeParse(req.query);
+    const { page, limit } = pagination.success ? pagination.data : { page: 1, limit: 20 };
+
+    const orders = await prismaClient.order.findMany({
+        where: { restaurentId: req.userId! },
+        include: { items: true, user: { select: { name: true, phoneNo: true } } },
+        orderBy: { placed_at: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+    });
+    res.json({ message: "Restaurant orders fetched", orders });
+}));
+
+// Delivery agent views their assigned orders
+router.get("/orders/delivery/my-orders", authMiddleware, requireRole("delivery"), asyncHandler(async (req: AuthRequest, res) => {
+    const pagination = paginationSchema.safeParse(req.query);
+    const { page, limit } = pagination.success ? pagination.data : { page: 1, limit: 20 };
+
+    const orders = await prismaClient.order.findMany({
+        where: { deliveryId: req.userId! },
+        include: { items: true, res: { select: { resName: true } } },
+        orderBy: { placed_at: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+    });
+    res.json({ message: "Delivery orders fetched", orders });
+}));
+
+// Admin: list all orders
+router.get("/all-orders/status", authMiddleware, requireRole("admin"), asyncHandler(async (req: AuthRequest, res) => {
+    const pagination = paginationSchema.safeParse(req.query);
+    const { page, limit } = pagination.success ? pagination.data : { page: 1, limit: 20 };
+
+    const orders = await prismaClient.order.findMany({
+        include: { items: true },
+        orderBy: { placed_at: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+    });
+    res.json({ message: "All orders fetched", orders });
+}));
+
+// Available delivery agents
+router.get("/delivery-available", authMiddleware, asyncHandler(async (req, res) => {
+    const agents = await prismaClient.deliveryAgent.findMany({
+        where: { isOnline: true },
+    });
+    res.json({ message: "Available delivery agents fetched", agents });
+}));
+
+// Available restaurants
+router.get("/restaurent-available", authMiddleware, asyncHandler(async (req, res) => {
+    const restaurants = await prismaClient.restaurent.findMany({
+        where: { isOpen: true },
+    });
+    res.json({ message: "Available restaurants fetched", restaurants });
+}));
+
+// Restaurant: view placed orders waiting for acceptance
+router.get("/placed-orders", authMiddleware, requireRole("admin"), asyncHandler(async (req: AuthRequest, res) => {
+    const pagination = paginationSchema.safeParse(req.query);
+    const { page, limit } = pagination.success ? pagination.data : { page: 1, limit: 20 };
+
+    const orders = await prismaClient.order.findMany({
+        where: { status: OrderStatus.PLACED, restaurentId: req.userId! },
+        include: { items: true, user: { select: { name: true, phoneNo: true } } },
+        orderBy: { placed_at: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+    });
+    res.json({ message: "Placed orders fetched", orders });
+}));
+
 export const orderRouter = router;

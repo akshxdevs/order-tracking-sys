@@ -15,7 +15,7 @@ datasource db {
 
 model User {
   id String @id @default(uuid())
-  name String? 
+  name String?
   username String @unique
   phoneNo String @unique
   address String?
@@ -44,12 +44,12 @@ model Order{
   id String @id @default(uuid())
   restaurentId String
   userId String
-  deliveryId String
+  deliveryId String?
   status OrderStatus
   totalPrice Int
   res Restaurent @relation(fields: [restaurentId],references: [id])
   user User @relation(fields: [userId],references: [id])
-  deliveryAgent DeliveryAgent @relation(fields: [deliveryId],references: [id])
+  deliveryAgent DeliveryAgent? @relation(fields: [deliveryId],references: [id])
   placed_at DateTime @default(now())
   updateAt DateTime @updatedAt
   items OrderItems[]
@@ -67,6 +67,8 @@ model OrderItems{
 enum OrderStatus {
   PLACED
   ACCEPTED
+  REJECTED
+  CANCELLED
   PICKED
   DELIVERED
 }
